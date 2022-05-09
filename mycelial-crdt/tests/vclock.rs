@@ -20,12 +20,26 @@ fn test_vclock_diff() {
     assert_eq!(1, vclock_1.inc(1));
 
     assert_eq!(
-        { let diff: VClockDiff = (&vclock_0, &vclock_1).into(); diff },
-        { let mut diff = VClockDiff::new(); diff.insert(0, (0, 1)); diff }
+        {
+            let diff: VClockDiff = (&vclock_0, &vclock_1).into();
+            diff
+        },
+        {
+            let mut diff = VClockDiff::new();
+            diff.insert(0, (0, 1));
+            diff
+        }
     );
 
     assert_eq!(
-        { let diff: VClockDiff = (&vclock_1, &vclock_0).into(); diff },
-        { let mut diff = VClockDiff::new(); diff.insert(1, (0, 1)); diff }
+        {
+            let diff: VClockDiff = (&vclock_1, &vclock_0).into();
+            diff
+        },
+        {
+            let mut diff = VClockDiff::new();
+            diff.insert(1, (0, 1));
+            diff
+        }
     );
 }

@@ -1,14 +1,13 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::From;
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct VClock(HashMap<u64, u64>);
 
-
 impl VClock {
     pub fn new() -> Self {
-        Self ( HashMap::new() )
+        Self(HashMap::new())
     }
 
     pub fn inc(&mut self, process: u64) -> u64 {
@@ -28,12 +27,16 @@ impl VClock {
         self.get_clock(process) + 1
     }
 
-
-    pub fn iter(&self) -> impl Iterator<Item=(&u64, &u64)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&u64, &u64)> {
         self.0.iter()
     }
 }
 
+impl Default for VClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<'a> IntoIterator for &'a VClock {
     type Item = (&'a u64, &'a u64);
@@ -45,22 +48,25 @@ impl<'a> IntoIterator for &'a VClock {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct VClockDiff (
-    HashMap<u64, (u64, u64)>
-);
-
+pub struct VClockDiff(HashMap<u64, (u64, u64)>);
 
 impl VClockDiff {
     pub fn new() -> Self {
-        Self ( HashMap::new() )
-    } 
+        Self(HashMap::new())
+    }
+
+    pub fn get_range(&self, process: u64) -> Option<(u64, u64)> {
+        self.0.get(&process).copied()
+    }
 
     pub fn insert(&mut self, process: u64, diff: (u64, u64)) {
         self.0.insert(process, diff);
     }
+}
 
-    pub fn get_range(&self, process: u64) -> Option<(u64, u64)> {
-        self.0.get(&process).map(|&x| x)
+impl Default for VClockDiff {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -79,9 +85,9 @@ impl From<(&VClock, &VClock)> for VClockDiff {
         for (&process, &clock_left) in vclock_left {
             let clock_right = vclock_right.get_clock(process);
             if clock_left > clock_right {
-                vdiff.insert(process, (clock_right, clock_left)); 
+                vdiff.insert(process, (clock_right, clock_left));
             };
-        };
+        }
         vdiff
     }
 }

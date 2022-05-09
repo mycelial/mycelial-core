@@ -1,10 +1,9 @@
 use crate::vclock::{VClock, VClockDiff};
-use std::collections::BTreeMap;
 use num::rational::Ratio;
 use num::BigInt;
-use std::cmp::{PartialOrd, Ord, Ordering};
-use serde::{Serialize, Deserialize};
-
+use serde::{Deserialize, Serialize};
+use std::cmp::{Ord, Ordering, PartialOrd};
+use std::collections::BTreeMap;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
 pub struct Key {
@@ -15,28 +14,25 @@ pub struct Key {
 
 impl Key {
     pub fn new<T: Into<Ratio<BigInt>>>(id: T, process: u64, op: u64) -> Self {
-        Self { id: id.into(), process, op }
+        Self {
+            id: id.into(),
+            process,
+            op,
+        }
     }
 
     pub fn between(process: u64, op: u64, left: Option<&Key>, right: Option<&Key>) -> Self {
         let id = match (left, right) {
-            (None, Some(Key{ id, .. })) => {
-                id - BigInt::from(1_i64)
-            },
-            (Some(Key{id: id_left, ..}), Some(Key{id: id_right, ..})) => {
+            (None, Some(Key { id, .. })) => id - BigInt::from(1_i64),
+            (Some(Key { id: id_left, .. }), Some(Key { id: id_right, .. })) => {
                 (id_left + id_right) / BigInt::from(2_i64)
-            },
-            (Some(Key{id, ..}), None) => {
-                id + BigInt::from(1_i64)
-            },
-            (None, None) => {
-                Ratio::new_raw(BigInt::from(0), BigInt::from(1))
-            },
+            }
+            (Some(Key { id, .. }), None) => id + BigInt::from(1_i64),
+            (None, None) => Ratio::new_raw(BigInt::from(0), BigInt::from(1)),
         };
-        Key{id, process, op}
+        Key { id, process, op }
     }
 }
-
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Value {
@@ -54,21 +50,18 @@ impl<T: Into<String>> From<T> for Value {
 
 impl Value {
     fn visible(&self) -> bool {
-        match self {
-            Value::Tombstone(_) | Value::Empty => false,
-            _ => true,
-        }
+        !matches!(self, Value::Tombstone(_) | Value::Empty)
     }
 }
 
 struct Hooks {
-    pub update: Option<Box<dyn Fn(&Op)>>
+    pub update: Option<Box<dyn Fn(&Op)>>,
 }
 
 impl std::fmt::Debug for Hooks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.update.is_some() {
-            true  => write!(f, "Hooks{{ update: Some(..) }}"),
+            true => write!(f, "Hooks{{ update: Some(..) }}"),
             false => write!(f, "Hooks{{ update: None }}"),
         }
     }
@@ -76,7 +69,7 @@ impl std::fmt::Debug for Hooks {
 
 impl Hooks {
     pub fn new() -> Self {
-        Self{ update: None }
+        Self { update: None }
     }
 
     pub fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
@@ -98,16 +91,13 @@ pub struct List {
 
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Op {
-    I{
-        key: Key,
-        value: Value,
-    },
+    I { key: Key, value: Value },
 }
 
 impl Op {
     fn key(&self) -> &Key {
         match self {
-            Op::I{ key, .. } => key,
+            Op::I { key, .. } => key,
         }
     }
 }
@@ -124,17 +114,17 @@ impl Ord for Op {
     }
 }
 
-
 #[derive(Debug, Clone, Copy)]
 pub enum ListError {
-    OutOfOrder{
+    OutOfOrder {
         process: u64,
         current_clock: u64,
-        operation_clock: u64
+        operation_clock: u64,
     },
     OutOfBounds,
 }
 
+unsafe impl Send for List {}
 
 impl List {
     pub fn new(process: u64) -> Self {
@@ -142,12 +132,12 @@ impl List {
             process,
             vclock: VClock::new(),
             data: BTreeMap::new(),
-            hooks: Hooks::new()
+            hooks: Hooks::new(),
         }
     }
 
     // sets on update hook
-    pub fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>)  {
+    pub fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
         self.hooks.set_on_update(hook)
     }
 
@@ -160,28 +150,42 @@ impl List {
         let mut keys = self.data.keys();
         let (left, right) = match index {
             index if index > self.data.len() => return Err(ListError::OutOfBounds),
-            index if index == 0 => (None, keys.nth(0)),
+            index if index == 0 => (None, keys.next()),
             index if index == self.data.len() => (keys.nth(self.data.len() - 1), None),
             index => {
-                let left = (&mut keys).skip(index - 1).next();
+                let left = (&mut keys).nth(index - 1);
                 let right = keys.next();
                 (left, right)
             }
         };
-        let key = Key::between(self.process, self.vclock.next_value(self.process), left, right);
+        let key = Key::between(
+            self.process,
+            self.vclock.next_value(self.process),
+            left,
+            right,
+        );
         self.on_update(&key, &value);
         self.insert_key(key, value);
         Ok(())
     }
 
-
     /// Delete value at index
     pub fn delete(&mut self, index: usize) {
-        let key = match self.data.iter().filter(|(_, value)| value.visible()).map(|x| x.0).skip(index).next() {
+        let key = match self
+            .data
+            .iter()
+            .filter(|(_, value)| value.visible())
+            .map(|x| x.0)
+            .nth(index)
+        {
             None => return,
             Some(key) => key,
         };
-        let tombstone_key = Key::new(key.id.clone(), self.process, self.vclock.next_value(self.process));
+        let tombstone_key = Key::new(
+            key.id.clone(),
+            self.process,
+            self.vclock.next_value(self.process),
+        );
         let value = Value::Tombstone(key.clone());
         self.on_update(&tombstone_key, &value);
         self.insert_key(tombstone_key, value);
@@ -194,22 +198,22 @@ impl List {
             match self.vclock.get_clock(op_key.process) {
                 clock if clock >= op_key.op => {
                     // this op was already seen
-                    continue
-                },
+                    continue;
+                }
                 clock if clock + 1 != op_key.op => {
                     // out of order operation
-                    return Err(ListError::OutOfOrder{
-                        process: self.process,
+                    return Err(ListError::OutOfOrder {
+                        process: op_key.process,
                         current_clock: clock,
                         operation_clock: op_key.op,
-                    })
-                },
+                    });
+                }
                 _ => (),
             };
             match op {
-                Op::I{value, ..} => self.insert_key(op_key, value.clone()),
+                Op::I { value, .. } => self.insert_key(op_key, value.clone()),
             }
-        };
+        }
         Ok(())
     }
 
@@ -220,7 +224,11 @@ impl List {
 
     /// Build vector of values
     pub fn to_vec<'a, 'b: 'a>(&'b self) -> Vec<&'a Value> {
-        self.data.iter().map(|x| x.1).filter(|x| x.visible()).collect()
+        self.data
+            .iter()
+            .map(|x| x.1)
+            .filter(|x| x.visible())
+            .collect()
     }
 
     /// Share own vclock state
@@ -233,22 +241,31 @@ impl List {
         let vdiff: VClockDiff = (self.vclock(), other).into();
         let mut ops: Vec<Op> = Vec::new();
         for (key, value) in self.data.iter() {
-            let (start, end) = match vdiff.get_range(key.process) {
-                None => continue,
-                Some((start, end)) => (start, end),
+            // check if peer already seen that key
+            match vdiff.get_range(key.process) {
+                Some((start, end)) if key.op > start && key.op <= end => (),
+                _ => continue,
             };
-            if (key.op > start) && (key.op <= end) {
-                match value {
-                    Value::Tombstone(key) if key.op > start && key.op <= end=> {
-                        // if peer didn't see insert, which is being deleted - generate empty value to preserve
-                        // sequence of operations
-                        ops.push(Op::I{ key: key.clone(), value: Value::Empty });
-                    },
+
+            // check if peer seen key, which is being held by tombstone
+            if let Value::Tombstone(tombstone_key) = value {
+                // if peer didn't see insert, which is being deleted - generate empty value to preserve
+                // sequence of operations
+                match vdiff.get_range(tombstone_key.process) {
+                    Some((start, end)) if tombstone_key.op > start && tombstone_key.op <= end => {
+                        ops.push(Op::I {
+                            key: tombstone_key.clone(),
+                            value: Value::Empty,
+                        });
+                    }
                     _ => (),
                 }
-                ops.push(Op::I{key: key.clone(), value: value.clone()})
-            };
-        };
+            }
+            ops.push(Op::I {
+                key: key.clone(),
+                value: value.clone(),
+            })
+        }
         ops.sort_by(|left, right| left.key().op.cmp(&right.key().op));
         ops
     }
@@ -256,17 +273,21 @@ impl List {
     fn insert_key(&mut self, key: Key, value: Value) {
         self.vclock.inc(key.process);
         match value {
-            Value::Tombstone(ref key) => { self.data.remove(key); },
+            Value::Tombstone(ref key) => {
+                self.data.remove(key);
+            }
             Value::Empty => return,
-            _ => ()
+            _ => (),
         }
         self.data.insert(key, value);
     }
 
     fn on_update(&self, key: &Key, value: &Value) {
-        match self.hooks.update {
-            Some(ref u) => u(&Op::I{key: key.clone(), value: value.clone()}),
-            _ => ()
+        if let Some(ref u) = self.hooks.update {
+            u(&Op::I {
+                key: key.clone(),
+                value: value.clone(),
+            })
         }
     }
 
