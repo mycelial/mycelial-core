@@ -34,6 +34,7 @@ impl Key {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Value {
     Str(String),
