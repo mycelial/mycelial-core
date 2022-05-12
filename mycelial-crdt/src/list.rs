@@ -1,3 +1,26 @@
+//! List CRDT with delta state support
+//!
+//! # Example
+//!
+//! ```rust
+//! use mycelial_crdt::list::{Value, List};
+//!
+//! let mut list_0 = List::new(0);
+//! let mut list_1 = List::new(1);
+//!
+//! list_0.append("hello".into());
+//! list_1.append("world!".into());
+//!
+//! let diff_01 = list_0.diff(list_1.vclock());
+//! let diff_10 = list_1.diff(list_0.vclock());
+//!
+//! list_0.apply(&diff_10);
+//! list_1.apply(&diff_01);
+//!
+//! assert_eq!(list_0.to_vec(), vec!["hello", "world!"]);
+//! assert_eq!(list_1.to_vec(), vec!["hello", "world!"]);
+//! ```
+
 use crate::vclock::{VClock, VClockDiff};
 use num::rational::Ratio;
 use num::BigInt;
@@ -5,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::BTreeMap;
 
+/// Uniquely identifies operation for a given process
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
 pub struct Key {
     id: Ratio<BigInt>,
@@ -13,6 +37,7 @@ pub struct Key {
 }
 
 impl Key {
+    /// Construct new key for a given process and operation number
     pub fn new<T: Into<Ratio<BigInt>>>(id: T, process: u64, op: u64) -> Self {
         Self {
             id: id.into(),
@@ -21,6 +46,7 @@ impl Key {
         }
     }
 
+    /// Crate new key between left and right keys
     pub fn between(process: u64, op: u64, left: Option<&Key>, right: Option<&Key>) -> Self {
         let id = match (left, right) {
             (None, Some(Key { id, .. })) => id - BigInt::from(1_i64),
@@ -34,18 +60,38 @@ impl Key {
     }
 }
 
+/// Value represents data types, which list can currently store
+/// Structure is not full and probably will be expanded in near future, hence non_exhaustive
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Value {
+    /// String
     Str(String),
+
+    /// Vector os Value
     Vec(Vec<Value>),
+
+    /// Tombstone, for deletion indication
     Tombstone(Key),
+
+    /// Empty value, never actually appears in the List itself
+    ///
+    /// Required to preserve sequence of vclock operations in diff
     Empty,
 }
 
 impl<T: Into<String>> From<T> for Value {
     fn from(value: T) -> Value {
         Value::Str(value.into())
+    }
+}
+
+impl PartialEq<str> for Value {
+    fn eq(&self, other: &str) -> bool {
+        match self {
+            Self::Str(s) => s.as_str().eq(other),
+            _ => false,
+        }
     }
 }
 
@@ -69,30 +115,33 @@ impl std::fmt::Debug for Hooks {
 }
 
 impl Hooks {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self { update: None }
     }
 
-    pub fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
+    fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
         self.update = Some(hook)
     }
 
-    pub fn unset_on_update(&mut self) {
+    fn unset_on_update(&mut self) {
         self.update = None
     }
 }
 
-#[derive(Debug)]
-pub struct List {
-    process: u64,
-    vclock: VClock,
-    data: BTreeMap<Key, Value>,
-    hooks: Hooks,
-}
 
+/// Op, represents operation over list
+///
+/// Currently everything is represented as an **I**nsert, since deletion could be represented as a
+/// insertion of a tombstone
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Op {
-    I { key: Key, value: Value },
+    /// I - short for Insertion
+    I { 
+        /// Op key
+        key: Key, 
+        /// Op value
+        value: Value 
+    },
 }
 
 impl Op {
@@ -115,19 +164,37 @@ impl Ord for Op {
     }
 }
 
+/// List Error
 #[derive(Debug, Clone, Copy)]
 pub enum ListError {
+    /// Apply operation failed due to missing elements in provided sequence
     OutOfOrder {
+        /// Id of a process, which owns list
         process: u64,
+        /// Current clock for a process
         current_clock: u64,
+        /// Operation clock
         operation_clock: u64,
     },
+    /// Insertion failure due to out of bounds index
     OutOfBounds,
+}
+
+/// List
+#[derive(Debug)]
+pub struct List {
+    process: u64,
+    vclock: VClock,
+    data: BTreeMap<Key, Value>,
+    hooks: Hooks,
 }
 
 unsafe impl Send for List {}
 
 impl List {
+    /// Create new list
+    ///
+    /// Process is is a unique identifier among peers, part of vclock
     pub fn new(process: u64) -> Self {
         Self {
             process,
@@ -137,11 +204,15 @@ impl List {
         }
     }
 
-    // sets on update hook
+    /// Set on update hook
+    ///
+    /// Whenever local update happens - hook will be invoked
+    /// Only 1 hook could be current set
     pub fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
         self.hooks.set_on_update(hook)
     }
 
+    /// Unset on udpate hook
     pub fn unset_on_update(&mut self) {
         self.hooks.unset_on_update()
     }
@@ -170,6 +241,7 @@ impl List {
         Ok(())
     }
 
+    // FIXME: OutOfBounds error
     /// Delete value at index
     pub fn delete(&mut self, index: usize) {
         let key = match self
@@ -192,7 +264,12 @@ impl List {
         self.insert_key(tombstone_key, value);
     }
 
-    /// Apply operations
+    /// Apply operations generated by peers
+    ///
+    /// Operation application are idemponent, if operation number is less that current vclock for a
+    /// process, which generated operation - it will be skipped
+    ///
+    /// Gaps in operations are not allowed and would trigger error
     pub fn apply(&mut self, ops: &[Op]) -> Result<(), ListError> {
         for op in ops {
             let op_key = op.key().clone();
@@ -271,6 +348,12 @@ impl List {
         ops
     }
 
+    /// Get size of stored data (without tombstones)
+    pub fn size(&self) -> usize {
+        // FIXME: add list metrics to avoid scan
+        self.data.values().filter(|x| x.visible()).count()
+    }
+
     fn insert_key(&mut self, key: Key, value: Value) {
         self.vclock.inc(key.process);
         match value {
@@ -292,8 +375,4 @@ impl List {
         }
     }
 
-    pub fn size(&self) -> usize {
-        // FIXME: add list metrics to avoid scan
-        self.data.values().filter(|x| x.visible()).count()
-    }
 }
