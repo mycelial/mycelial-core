@@ -137,11 +137,11 @@ impl Hooks {
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Op {
     /// I - short for Insertion
-    I { 
+    I {
         /// Op key
-        key: Key, 
+        key: Key,
         /// Op value
-        value: Value 
+        value: Value
     },
 }
 
@@ -208,7 +208,7 @@ impl List {
     /// Set on update hook
     ///
     /// Whenever local update happens - hook will be invoked
-    /// Only 1 hook could be current set
+    /// Only 1 hook can be current set
     pub fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
         self.hooks.set_on_update(hook)
     }
