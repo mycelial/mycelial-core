@@ -46,7 +46,7 @@ impl Key {
         }
     }
 
-    /// Crate new key between left and right keys
+    /// Create new key between left and right keys
     pub fn between(process: u64, op: u64, left: Option<&Key>, right: Option<&Key>) -> Self {
         let id = match (left, right) {
             (None, Some(Key { id, .. })) => id - BigInt::from(1_i64),
@@ -61,6 +61,7 @@ impl Key {
 }
 
 /// Value represents data types, which list can currently store
+///
 /// Structure is not full and probably will be expanded in near future, hence non_exhaustive
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
