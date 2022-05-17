@@ -132,7 +132,7 @@ impl Hooks {
 
 /// Op, represents operation over list
 ///
-/// Currently everything is represented as an **I**nsert, since deletion could be represented as a
+/// Currently everything is represented as an **I**nsert, since deletion can be represented as a
 /// insertion of a tombstone
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Op {
@@ -195,7 +195,7 @@ unsafe impl Send for List {}
 impl List {
     /// Create new list
     ///
-    /// Process is is a unique identifier among peers, part of vclock
+    /// Process is a unique identifier among peers, part of vclock
     pub fn new(process: u64) -> Self {
         Self {
             process,
@@ -213,7 +213,7 @@ impl List {
         self.hooks.set_on_update(hook)
     }
 
-    /// Unset on udpate hook
+    /// Unset on update hook
     pub fn unset_on_update(&mut self) {
         self.hooks.unset_on_update()
     }
