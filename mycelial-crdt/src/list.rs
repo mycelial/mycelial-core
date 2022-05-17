@@ -137,11 +137,11 @@ impl Hooks {
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Op {
     /// I - short for Insertion
-    I { 
+    I {
         /// Op key
-        key: Key, 
+        key: Key,
         /// Op value
-        value: Value 
+        value: Value
     },
 }
 
@@ -213,7 +213,7 @@ impl List {
         self.hooks.set_on_update(hook)
     }
 
-    /// Unset on udpate hook
+    /// Unset on update hook
     pub fn unset_on_update(&mut self) {
         self.hooks.unset_on_update()
     }
