@@ -93,25 +93,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
-name = "mycelia-wasm"
-version = "0.1.0"
-dependencies = [
- "js-sys",
- "mycelial-crdt 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "mycelial-crdt"
-version = "0.1.0"
-dependencies = [
- "num",
- "quickcheck",
- "serde",
-]
-
-[[package]]
 name = "mycelial-crdt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -119,6 +100,25 @@ checksum = "b27f49f0e9ef9bba619d824aed270a22cc3323cd2f7061d5123fc0a1161bc1af"
 dependencies = [
  "num",
  "serde",
+]
+
+[[package]]
+name = "mycelial-crdt"
+version = "0.1.1"
+dependencies = [
+ "num",
+ "quickcheck",
+ "serde",
+]
+
+[[package]]
+name = "mycelial-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "mycelial-crdt 0.1.0",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
