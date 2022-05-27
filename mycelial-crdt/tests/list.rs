@@ -41,19 +41,19 @@ fn test_diff_apply() {
     let ops = list_a.diff(list_b.vclock());
     assert_eq!(
         vec![
-            Op::I {
+            Op {
                 key: Key::new(BigInt::from(0), 0, 1),
                 value: "hello".into()
             },
-            Op::I {
+            Op {
                 key: Key::new(BigInt::from(1), 0, 2),
                 value: Value::Empty
             },
-            Op::I {
+            Op {
                 key: Key::new(BigInt::from(2), 0, 3),
                 value: "world".into()
             },
-            Op::I {
+            Op {
                 key: Key::new(BigInt::from(1), 0, 4),
                 value: Value::Tombstone(Key::new(BigInt::from(1), 0, 2))
             }
@@ -85,15 +85,15 @@ fn test_diff_apply_deletion() {
     let ops = list_a.diff(list_b.vclock());
     assert_eq!(
         vec![
-            Op::I {
+            Op {
                 key: Key::new(BigInt::from(0), 0, 1),
                 value: "hello".into()
             },
-            Op::I {
+            Op {
                 key: Key::new(BigInt::from(1), 0, 2),
                 value: " ".into()
             },
-            Op::I {
+            Op {
                 key: Key::new(BigInt::from(2), 0, 3),
                 value: "world".into()
             },
@@ -107,7 +107,7 @@ fn test_diff_apply_deletion() {
     let ops = list_a.diff(list_b.vclock());
     // no empty value here, only tombstone, since list_b seen insert of " "
     assert_eq!(
-        vec![Op::I {
+        vec![Op {
             key: Key::new(BigInt::from(1), 0, 4),
             value: Value::Tombstone(Key::new(BigInt::from(1), 0, 2))
         }],
@@ -164,7 +164,7 @@ fn test_hooks() {
     list.append("1".into()).unwrap_or(());
     assert!(matches!(
         rx.try_recv(),
-        Ok(Op::I {
+        Ok(Op {
             value: Value::Str(_),
             ..
         })
@@ -173,7 +173,7 @@ fn test_hooks() {
     list.delete(0);
     assert!(matches!(
         rx.try_recv(),
-        Ok(Op::I {
+        Ok(Op {
             value: Value::Tombstone(_),
             ..
         })
@@ -235,7 +235,7 @@ impl Arbitrary for TestOp {
             },
             num if num <= 2 => TestOp::Delete { process, position },
             _ => TestOp::Insert {
-                value: Value::from(""),
+                value: Value::from(format!("{}", u8::arbitrary(g))),
                 process,
                 position,
             },
