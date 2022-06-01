@@ -16,20 +16,20 @@ fn test_list() {
         vec![&Value::Str("hello".into()), &Value::Str("world".into()),]
     );
 
-    list.delete(0);
+    assert!(list.delete(0).is_ok());
     assert_eq!(list.to_vec(), vec![&Value::Str("world".into())]);
 
-    list.delete(0);
+    assert!(list.delete(0).is_ok());
     assert!(list.to_vec().is_empty());
 }
 
 #[test]
 fn test_diff_apply() {
     let mut list_a = List::new(0);
-    list_a.append("hello".into()).unwrap();
-    list_a.append(" ".into()).unwrap();
-    list_a.append("world".into()).unwrap();
-    list_a.delete(1);
+    assert!(list_a.append("hello".into()).is_ok());
+    assert!(list_a.append(" ".into()).is_ok());
+    assert!(list_a.append("world".into()).is_ok());
+    assert!(list_a.delete(1).is_ok());
     assert_eq!(
         list_a.to_vec(),
         vec![&Value::Str("hello".into()), &Value::Str("world".into())]
@@ -67,9 +67,9 @@ fn test_diff_apply() {
 #[test]
 fn test_diff_apply_deletion() {
     let mut list_a = List::new(0);
-    list_a.append("hello".into()).unwrap();
-    list_a.append(" ".into()).unwrap();
-    list_a.append("world".into()).unwrap();
+    assert!(list_a.append("hello".into()).is_ok());
+    assert!(list_a.append(" ".into()).is_ok());
+    assert!(list_a.append("world".into()).is_ok());
     assert_eq!(
         list_a.to_vec(),
         vec![
@@ -103,7 +103,7 @@ fn test_diff_apply_deletion() {
     assert!(list_b.apply(&ops).is_ok());
     assert_eq!(list_a.to_vec(), list_b.to_vec());
 
-    list_a.delete(1);
+    assert!(list_a.delete(1).is_ok());
     let ops = list_a.diff(list_b.vclock());
     // no empty value here, only tombstone, since list_b seen insert of " "
     assert_eq!(
@@ -170,7 +170,7 @@ fn test_hooks() {
         })
     ));
 
-    list.delete(0);
+    assert!(list.delete(0).is_ok());
     assert!(matches!(
         rx.try_recv(),
         Ok(Op {
@@ -272,7 +272,12 @@ fn test_convergence() {
                             }
                         }
                     };
-                    list.insert(index, value).unwrap();
+                    match index {
+                        0 => list.prepend(value),
+                        val if val == list.size() => list.append(value),
+                        _ => list.insert(index, value),
+                    }
+                    .unwrap()
                 }
                 TestOp::Delete { process, position } => {
                     let list = lists.get_mut(process as usize).unwrap();
@@ -281,7 +286,7 @@ fn test_convergence() {
                         Position::Tail => list.size().max(1) - 1,
                         Position::InBetween(val) => val % list.size().max(1),
                     };
-                    list.delete(index);
+                    list.delete(index).ok();
                 }
                 TestOp::Merge { from, to } => {
                     let (from, to) = (from as usize, to as usize);

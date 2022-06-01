@@ -88,7 +88,6 @@ pub enum Value {
 }
 impl Eq for Value {}
 
-
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Value::Str(value.into())
@@ -159,14 +158,14 @@ impl Hooks {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct Op {
     /// Op key
-    pub  key: Key,
+    pub key: Key,
 
     /// Op value
     pub value: Value,
 }
 
 /// List Error
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ListError {
     /// Apply operation failed due to missing elements in provided sequence
     OutOfOrder {
@@ -184,7 +183,8 @@ pub enum ListError {
 /// List
 #[derive(Debug)]
 pub struct List {
-    process: u64,
+    /// process id
+    pub process: u64,
     vclock: VClock,
     data: BTreeMap<Key, Value>,
     hooks: Hooks,
@@ -299,13 +299,19 @@ impl List {
         self.insert(self.data.len(), value)
     }
 
+    /// Insert value at the start
+    pub fn prepend(&mut self, value: Value) -> Result<(), ListError> {
+        self.insert(0, value)
+    }
+
     /// Build vector of values
-    pub fn to_vec<'a, 'b: 'a>(&'b self) -> Vec<&'a Value> {
-        self.data
-            .iter()
-            .map(|x| x.1)
-            .filter(|x| x.visible())
-            .collect()
+    pub fn to_vec(&self) -> Vec<&Value> {
+        self.iter().collect()
+    }
+
+    /// Return iterator over stored elements
+    pub fn iter(&self) -> impl Iterator<Item = &Value> {
+        self.data.iter().map(|x| x.1).filter(|x| x.visible())
     }
 
     /// Share own vclock state

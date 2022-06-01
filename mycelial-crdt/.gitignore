@@ -2,3 +2,4 @@
 *.swp
 *.swo
 Cargo.lock
+www/
