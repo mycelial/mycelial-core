@@ -334,7 +334,21 @@ fn test_convergence() {
             .windows(2)
             .map(|slice| slice.get(0).unwrap().to_vec() == slice.get(1).unwrap().to_vec())
             .all(|x| x == true);
-        TestResult::from_bool(eq)
+        if !eq {
+            return TestResult::error("lists do not converge after merging")
+        }
+
+        // check that total diff restores list
+        let eq = lists.iter().map(|list| {
+            let mut empty = List::new(100500);
+            let diff = list.diff(empty.vclock());
+            empty.apply(&diff).is_ok() && empty.to_vec() == list.to_vec()
+        }).all(|x| x == true);
+        if !eq {
+            return TestResult::error("could not rebuild list from total diff")
+        }
+        TestResult::from_bool(true)
+
     }
     quickcheck(check as fn(Vec<TestOp>) -> TestResult)
 }
