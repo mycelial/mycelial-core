@@ -180,6 +180,15 @@ pub enum ListError {
     OutOfBounds,
 }
 
+
+impl std::fmt::Display for ListError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for ListError{}
+
 /// List
 #[derive(Debug)]
 pub struct List {
