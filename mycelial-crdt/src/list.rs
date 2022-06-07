@@ -129,6 +129,7 @@ impl Value {
 
 struct Hooks {
     pub update: Option<Box<dyn Fn(&Op)>>,
+    pub apply: Option<Box<dyn Fn()>>,
 }
 
 impl std::fmt::Debug for Hooks {
@@ -142,7 +143,7 @@ impl std::fmt::Debug for Hooks {
 
 impl Hooks {
     fn new() -> Self {
-        Self { update: None }
+        Self { update: None, apply: None }
     }
 
     fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
@@ -151,6 +152,14 @@ impl Hooks {
 
     fn unset_on_update(&mut self) {
         self.update = None
+    }
+
+    fn set_on_apply(&mut self, hook: Box<dyn Fn()>) {
+        self.apply = Some(hook)
+    }
+
+    fn unset_on_apply(&mut self) {
+        self.apply = None
     }
 }
 
@@ -227,6 +236,19 @@ impl List {
         self.hooks.unset_on_update()
     }
 
+    /// Set on apply hook
+    ///
+    /// Whenever remote operations gets applied, hook will be invoked
+    /// Only 1 hook can be current set
+    pub fn set_on_apply(&mut self, hook: Box<dyn Fn()>) {
+        self.hooks.set_on_apply(hook)
+    }
+
+    /// Unset on apply hook
+    pub fn unset_on_apply(&mut self) {
+        self.hooks.unset_on_apply()
+    }
+
     /// Insert value at index
     pub fn insert(&mut self, index: usize, value: Value) -> Result<(), ListError> {
         let mut keys = self.data.keys();
@@ -281,6 +303,8 @@ impl List {
     ///
     /// Gaps in operations are not allowed and will trigger an error.
     pub fn apply(&mut self, ops: &[Op]) -> Result<(), ListError> {
+        let mut applied = 0;
+
         for op in ops {
             let op_key = op.key.clone();
             match self.vclock.get_clock(op_key.process) {
@@ -298,7 +322,14 @@ impl List {
                 }
                 _ => (),
             };
+            applied += 1;
             self.insert_key(op_key, op.value.clone())
+        }
+
+        match (applied, &self.hooks.apply) {
+            (0, _) => (),
+            (_, None) => (),
+            (_, Some(hook)) => hook(),
         }
         Ok(())
     }

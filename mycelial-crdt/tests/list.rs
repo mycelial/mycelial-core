@@ -2,6 +2,7 @@ use mycelial_crdt::list::{Key, List, Op, Value};
 use num::rational::Ratio;
 use num::BigInt;
 use quickcheck::{quickcheck, Arbitrary, Gen, TestResult};
+use std::sync::mpsc::channel;
 
 #[test]
 fn test_list() {
@@ -150,9 +151,7 @@ fn test_key_between() {
 }
 
 #[test]
-fn test_hooks() {
-    use std::sync::mpsc::channel;
-
+fn test_on_update_hook() {
     let (tx, rx) = channel();
     let mut list = List::new(0);
 
@@ -179,7 +178,34 @@ fn test_hooks() {
         })
     ));
 
+    // unset drops Sender, Received will always return Err
     list.unset_on_update();
+    assert!(matches!(rx.recv(), Err(_)))
+}
+
+
+#[test]
+fn test_on_apply_hook() {
+    let (tx, rx) = channel();
+    let mut list_0 = List::new(0);
+    let mut list_1 = List::new(1);
+
+    let hook: Box<dyn Fn()> = Box::new(move || {
+        tx.send(()).unwrap_or(());
+    });
+    list_1.set_on_apply(hook);
+
+    list_0.append("0".into()).unwrap_or(());
+    let diff = list_0.diff(list_1.vclock());
+    assert!(list_1.apply(&diff).is_ok());
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(()),
+    ));
+
+
+    // unset drops Sender, Received will always return Err
+    list_1.unset_on_apply();
     assert!(matches!(rx.recv(), Err(_)))
 }
 
