@@ -67,7 +67,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "mycelial-crdt"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "num",
  "quickcheck",
