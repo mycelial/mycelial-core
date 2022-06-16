@@ -57,7 +57,10 @@ pub trait ListKey: Sized + Ord + Eq + Clone {
         right: Option<&Self>,
     ) -> Result<Self, ListError>;
 
-    /// Check is key is arbitraty precision
+    /// Check if key supports  arbitrary precision arithmetic
+    ///
+    /// If it does - insert at any position is allowed
+    /// Otherwise - it's a key for append-only list
     fn is_arbitraty_precision() -> bool;
 }
 
