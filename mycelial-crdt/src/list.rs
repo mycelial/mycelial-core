@@ -30,24 +30,48 @@ use std::collections::BTreeMap;
 
 /// Uniquely identifies operation for a given process
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
-pub struct Key {
-    id: Ratio<BigInt>,
+pub struct Key<T> {
+    id: T,
     process: u64,
     op: u64,
 }
 
-impl Key {
+impl<T: Clone> Key<T> {
     /// Construct new key for a given process and operation number
-    pub fn new<T: Into<Ratio<BigInt>>>(id: T, process: u64, op: u64) -> Self {
+    pub fn new<R: Into<T>>(id: R, process: u64, op: u64) -> Self {
         Self {
             id: id.into(),
             process,
             op,
         }
     }
+}
 
+/// List Key trait
+pub trait ListKey: Sized + Ord + Eq + Clone {
+    /// Defines behaviour of the list by defining implementation of function `between`
+    fn between(
+        process: u64,
+        op: u64,
+        left: Option<&Self>,
+        right: Option<&Self>,
+    ) -> Result<Self, ListError>;
+
+    /// Check if key supports  arbitrary precision arithmetic
+    ///
+    /// If it does - insert at any position is allowed
+    /// Otherwise - it's a key for append-only list
+    fn is_arbitraty_precision() -> bool;
+}
+
+impl ListKey for Key<Ratio<BigInt>> {
     /// Create new key between left and right keys
-    pub fn between(process: u64, op: u64, left: Option<&Key>, right: Option<&Key>) -> Self {
+    fn between(
+        process: u64,
+        op: u64,
+        left: Option<&Self>,
+        right: Option<&Self>,
+    ) -> Result<Self, ListError> {
         let id = match (left, right) {
             (None, Some(Key { id, .. })) => id - BigInt::from(1_i64),
             (Some(Key { id: id_left, .. }), Some(Key { id: id_right, .. })) => {
@@ -56,7 +80,31 @@ impl Key {
             (Some(Key { id, .. }), None) => id + BigInt::from(1_i64),
             (None, None) => Ratio::new_raw(BigInt::from(0), BigInt::from(1)),
         };
-        Key { id, process, op }
+        Ok(Key { id, process, op })
+    }
+    fn is_arbitraty_precision() -> bool {
+        true
+    }
+}
+
+impl ListKey for Key<i64> {
+    fn between(
+        process: u64,
+        op: u64,
+        left: Option<&Self>,
+        right: Option<&Self>,
+    ) -> Result<Self, ListError> {
+        let id: i64 = match (left, right) {
+            (None, None) => 0,
+            (None, Some(Key { id, .. })) => id - 1,
+            (Some(Key { id, .. }), None) => id + 1,
+            (Some(_), Some(_)) => return Err(ListError::AppendOnly),
+        };
+        Ok(Key { id, process, op })
+    }
+
+    fn is_arbitraty_precision() -> bool {
+        false
     }
 }
 
@@ -65,7 +113,7 @@ impl Key {
 /// Structure is not full and probably will be expanded in near future, hence non_exhaustive
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum Value {
+pub enum Value<Key> {
     /// String
     Str(String),
 
@@ -76,7 +124,7 @@ pub enum Value {
     Float(f64),
 
     /// Vector os Value
-    Vec(Vec<Value>),
+    Vec(Vec<Value<Key>>),
 
     /// Tombstone, for deletion indication
     Tombstone(Key),
@@ -86,33 +134,34 @@ pub enum Value {
     /// Required to preserve sequence of vclock operations in diff
     Empty,
 }
-impl Eq for Value {}
 
-impl From<&str> for Value {
+impl<Key: Eq> Eq for Value<Key> {}
+
+impl<Key> From<&str> for Value<Key> {
     fn from(value: &str) -> Self {
         Value::Str(value.into())
     }
 }
 
-impl From<String> for Value {
+impl<Key> From<String> for Value<Key> {
     fn from(value: String) -> Self {
         Value::Str(value)
     }
 }
 
-impl From<f64> for Value {
+impl<Key> From<f64> for Value<Key> {
     fn from(value: f64) -> Self {
         Value::Float(value)
     }
 }
 
-impl From<bool> for Value {
+impl<Key> From<bool> for Value<Key> {
     fn from(value: bool) -> Self {
         Value::Bool(value)
     }
 }
 
-impl PartialEq<str> for Value {
+impl<Key> PartialEq<str> for Value<Key> {
     fn eq(&self, other: &str) -> bool {
         match self {
             Self::Str(s) => s.as_str().eq(other),
@@ -121,32 +170,42 @@ impl PartialEq<str> for Value {
     }
 }
 
-impl Value {
+impl<Key> Value<Key> {
     fn visible(&self) -> bool {
         !matches!(self, Value::Tombstone(_) | Value::Empty)
     }
 }
 
-struct Hooks {
-    pub update: Option<Box<dyn Fn(&Op)>>,
+struct Hooks<Key> {
+    pub update: Option<Box<dyn Fn(&Op<Key>)>>,
     pub apply: Option<Box<dyn Fn()>>,
 }
 
-impl std::fmt::Debug for Hooks {
+impl<Key> std::fmt::Debug for Hooks<Key> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.update.is_some() {
-            true => write!(f, "Hooks{{ update: Some(..) }}"),
-            false => write!(f, "Hooks{{ update: None }}"),
-        }
+        let update = if self.update.is_some() {
+            "Some(..)"
+        } else {
+            "None"
+        };
+        let apply = if self.apply.is_some() {
+            "Some(..)"
+        } else {
+            "None"
+        };
+        write!(f, "Hooks{{ update: {}, apply: {}}}", update, apply)
     }
 }
 
-impl Hooks {
+impl<Key> Hooks<Key> {
     fn new() -> Self {
-        Self { update: None, apply: None }
+        Self {
+            update: None,
+            apply: None,
+        }
     }
 
-    fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
+    fn set_on_update(&mut self, hook: Box<dyn Fn(&Op<Key>)>) {
         self.update = Some(hook)
     }
 
@@ -165,12 +224,12 @@ impl Hooks {
 
 /// Op represents operation over list
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-pub struct Op {
+pub struct Op<Key> {
     /// Op key
     pub key: Key,
 
     /// Op value
-    pub value: Value,
+    pub value: Value<Key>,
 }
 
 /// List Error
@@ -187,8 +246,9 @@ pub enum ListError {
     },
     /// Insertion failure due to out of bounds index
     OutOfBounds,
+    /// Error occurs in append-only list when insert is not append or prepend
+    AppendOnly,
 }
-
 
 impl std::fmt::Display for ListError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -196,21 +256,25 @@ impl std::fmt::Display for ListError {
     }
 }
 
-impl std::error::Error for ListError{}
+impl std::error::Error for ListError {}
 
 /// List
 #[derive(Debug)]
-pub struct List {
+pub struct GenericList<Key> {
     /// process id
-    pub process: u64,
+    process: u64,
     vclock: VClock,
-    data: BTreeMap<Key, Value>,
-    hooks: Hooks,
+    data: BTreeMap<Key, Value<Key>>,
+    hooks: Hooks<Key>,
 }
 
-unsafe impl Send for List {}
+unsafe impl<Key> Send for GenericList<Key> {}
 
-impl List {
+impl<T> GenericList<Key<T>>
+where
+    Key<T>: ListKey,
+    T: Clone,
+{
     /// Create new list
     ///
     /// Process is a unique identifier among peers, part of vclock
@@ -227,7 +291,7 @@ impl List {
     ///
     /// Whenever local update happens, hook will be invoked
     /// Only 1 hook can be current set
-    pub fn set_on_update(&mut self, hook: Box<dyn Fn(&Op)>) {
+    pub fn set_on_update(&mut self, hook: Box<dyn Fn(&Op<Key<T>>)>) {
         self.hooks.set_on_update(hook)
     }
 
@@ -250,7 +314,10 @@ impl List {
     }
 
     /// Insert value at index
-    pub fn insert(&mut self, index: usize, value: Value) -> Result<(), ListError> {
+    pub fn insert(&mut self, index: usize, value: Value<Key<T>>) -> Result<(), ListError>
+    where
+        Key<T>: ListKey,
+    {
         let mut keys = self.data.keys();
         let (left, right) = match index {
             index if index > self.data.len() => return Err(ListError::OutOfBounds),
@@ -267,7 +334,7 @@ impl List {
             self.vclock.next_value(self.process),
             left,
             right,
-        );
+        )?;
         self.on_update(&key, &value);
         self.insert_key(key, value);
         Ok(())
@@ -302,7 +369,7 @@ impl List {
     /// process which generated the operation, it will be skipped.
     ///
     /// Gaps in operations are not allowed and will trigger an error.
-    pub fn apply(&mut self, ops: &[Op]) -> Result<(), ListError> {
+    pub fn apply(&mut self, ops: &[Op<Key<T>>]) -> Result<(), ListError> {
         let mut applied = 0;
 
         for op in ops {
@@ -335,22 +402,22 @@ impl List {
     }
 
     /// Append value at the end
-    pub fn append(&mut self, value: Value) -> Result<(), ListError> {
+    pub fn append(&mut self, value: Value<Key<T>>) -> Result<(), ListError> {
         self.insert(self.data.len(), value)
     }
 
     /// Insert value at the start
-    pub fn prepend(&mut self, value: Value) -> Result<(), ListError> {
+    pub fn prepend(&mut self, value: Value<Key<T>>) -> Result<(), ListError> {
         self.insert(0, value)
     }
 
     /// Build vector of values
-    pub fn to_vec(&self) -> Vec<&Value> {
+    pub fn to_vec(&self) -> Vec<&Value<Key<T>>> {
         self.iter().collect()
     }
 
     /// Return iterator over stored elements
-    pub fn iter(&self) -> impl Iterator<Item = &Value> {
+    pub fn iter(&self) -> impl Iterator<Item = &Value<Key<T>>> {
         self.data.iter().map(|x| x.1).filter(|x| x.visible())
     }
 
@@ -360,9 +427,9 @@ impl List {
     }
 
     /// Calculate diff
-    pub fn diff(&self, other: &VClock) -> Vec<Op> {
+    pub fn diff(&self, other: &VClock) -> Vec<Op<Key<T>>> {
         let vdiff: VClockDiff = (self.vclock(), other).into();
-        let mut ops: Vec<Op> = Vec::new();
+        let mut ops: Vec<Op<Key<T>>> = Vec::new();
         for (key, value) in self.data.iter() {
             // check if peer already seen that key
             match vdiff.get_range(key.process) {
@@ -399,7 +466,7 @@ impl List {
         self.data.values().filter(|x| x.visible()).count()
     }
 
-    fn insert_key(&mut self, key: Key, value: Value) {
+    fn insert_key(&mut self, key: Key<T>, value: Value<Key<T>>) {
         self.vclock.inc(key.process);
         match value {
             Value::Tombstone(ref key) => {
@@ -411,7 +478,7 @@ impl List {
         self.data.insert(key, value);
     }
 
-    fn on_update(&self, key: &Key, value: &Value) {
+    fn on_update(&self, key: &Key<T>, value: &Value<Key<T>>) {
         if let Some(ref u) = self.hooks.update {
             u(&Op {
                 key: key.clone(),
@@ -420,3 +487,9 @@ impl List {
         }
     }
 }
+
+/// General purpose List, supports inserts at any position
+pub type List = GenericList<Key<Ratio<BigInt>>>;
+
+/// Append only list, same as List except allows only prepend & append operations
+pub type AppendOnlyList = GenericList<Key<i64>>;
