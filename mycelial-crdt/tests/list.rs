@@ -227,8 +227,8 @@ enum Position {
 }
 
 // generate check function for given List and Key type
-// behaviour of test op is a bit diffrent, since List does allow usage of `insert` and AppendOnly
-// does not
+// behaviour of test op is a bit diffrent
+// since List does allow usage of `insert` and AppendOnly does not
 macro_rules! gen_qcheck {
     (@insert_allowed, $list: ident, $index: ident,  $value: ident ) => {
         match $index {
@@ -404,17 +404,16 @@ macro_rules! gen_qcheck {
             }
             TestResult::from_bool(true)
         }
+        quickcheck(check as fn(Vec<TestOp>) -> TestResult);
     }
 }
 
 #[test]
 fn test_list_convergence() {
     gen_qcheck!(List, Key<Ratio<BigInt>>, @insert_allowed);
-    quickcheck(check as fn(Vec<TestOp>) -> TestResult);
 }
 
 #[test]
 fn test_append_only_list_convergence() {
     gen_qcheck!(AppendOnlyList, Key<i64>, @insert_not_allowed);
-    quickcheck(check as fn(Vec<TestOp>) -> TestResult);
 }
