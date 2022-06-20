@@ -1,4 +1,4 @@
-use mycelial_crdt::list::{GenericList, Key, List, ListError, ListKey, Op, Value};
+use mycelial_crdt::list::{Key, ListKey, List, AppendOnlyList, ListError, Op, Value};
 use num::rational::Ratio;
 use num::BigInt;
 use quickcheck::{quickcheck, Arbitrary, Gen, TestResult};
@@ -217,6 +217,8 @@ fn test_on_apply_hook() {
     assert!(matches!(rx.recv(), Err(_)))
 }
 
+
+
 #[derive(Debug, Clone)]
 enum Position {
     Head,
@@ -224,186 +226,194 @@ enum Position {
     InBetween(usize),
 }
 
-#[derive(Debug, Clone)]
-enum TestOp<T> {
-    Insert {
-        process: u64,
-        position: Position,
-        value: Value<Key<T>>,
-    },
-    Delete {
-        process: u64,
-        position: Position,
-    },
-    Merge {
-        from: u64,
-        to: u64,
-    },
-}
-
-impl<T: Clone + 'static> TestOp<T> {
-    fn process(&self) -> u64 {
-        match self {
-            &TestOp::Insert { process, .. } => process,
-            &TestOp::Delete { process, .. } => process,
-            &TestOp::Merge { from, to } => from.max(to),
+// generate check function for given List and Key type
+// behaviour of test op is a bit diffrent
+// since List does allow usage of `insert` and AppendOnly does not
+macro_rules! gen_qcheck {
+    (@insert_allowed, $list: ident, $index: ident,  $value: ident ) => {
+        match $index {
+            0 => $list.prepend($value),
+            i if i == $list.size() => $list.append($value),
+            i => $list.insert(i, $value),
         }
-    }
-}
-
-impl<T: Clone + 'static> Arbitrary for TestOp<T> {
-    fn arbitrary(g: &mut Gen) -> Self {
-        let max_processes = 7;
-        let process = u64::arbitrary(g) % max_processes;
-
-        let position = match usize::arbitrary(g) % 10 {
-            0 => Position::InBetween(usize::arbitrary(g)),
-            num if num <= 5 => Position::Head,
-            _ => Position::Tail,
-        };
-
-        match (u8::arbitrary(g) as usize) % 10 {
-            0 => TestOp::Merge {
-                from: u64::arbitrary(g) % max_processes,
-                to: u64::arbitrary(g) % max_processes,
-            },
-            num if num <= 2 => TestOp::Delete { process, position },
-            _ => TestOp::Insert {
-                value: Value::from(format!("{}", u8::arbitrary(g))),
-                process,
-                position,
-            },
-        }
-    }
-}
-
-fn check<T: Clone + 'static>(ops: Vec<TestOp<T>>) -> TestResult
-where
-    Key<T>: ListKey,
-{
-    // currently list without arbitrary precision arithmetic for keys is append only
-    let append_only_error_allowed = !Key::<T>::is_arbitraty_precision();
-
-    // allocate lists
-    let max = (&ops).iter().map(|op| op.process()).max();
-    let lists = &mut match max {
-        Some(max) => (0..=max)
-            .map(|pos| GenericList::<Key<T>>::new(pos))
-            .collect::<Vec<_>>(),
-        None => return TestResult::discard(),
     };
+    (@insert_not_allowed, $list: ident, $index: ident, $value: ident) => {
+        match $index {
+            0 => $list.prepend($value),
+            _ => $list.append($value),
+        }
+    };
+    ($list_type: ty, $key_type: ty, $($setup:tt)*) => {
 
-    for op in ops {
-        match op {
-            TestOp::Insert {
-                process,
-                value,
-                position,
-            } => {
-                let list = lists.get_mut(process as usize).unwrap();
-                let index = match position {
-                    Position::Head => 0,
-                    Position::Tail => list.size(),
-                    Position::InBetween(val) => {
-                        let size = list.size();
-                        if size == 0 {
-                            0
-                        } else {
-                            val % size
-                        }
-                    }
+        #[derive(Debug, Clone)]
+        enum TestOp {
+            Insert {
+                process: u64,
+                position: Position,
+                value: Value<$key_type>,
+            },
+            Delete {
+                process: u64,
+                position: Position,
+            },
+            Merge {
+                from: u64,
+                to: u64,
+            },
+        }
+
+        impl TestOp {
+            fn process(&self) -> u64 {
+                match self {
+                    &TestOp::Insert { process, .. } => process,
+                    &TestOp::Delete { process, .. } => process,
+                    &TestOp::Merge { from, to } => from.max(to),
+                }
+            }
+        }
+
+        impl Arbitrary for TestOp {
+            fn arbitrary(g: &mut Gen) -> Self {
+                let max_processes = 7;
+                let process = u64::arbitrary(g) % max_processes;
+
+                let position = match usize::arbitrary(g) % 10 {
+                    0 => Position::InBetween(usize::arbitrary(g)),
+                    num if num <= 5 => Position::Head,
+                    _ => Position::Tail,
                 };
-                match index {
-                    0 => list.prepend(value),
-                    val if val == list.size() => list.append(value),
-                    _ => match list.insert(index, value) {
-                        Ok(()) => Ok(()),
-                        Err(ListError::AppendOnly) if append_only_error_allowed => Ok(()),
-                        e => e,
+
+                match (u8::arbitrary(g) as usize) % 10 {
+                    0 => TestOp::Merge {
+                        from: u64::arbitrary(g) % max_processes,
+                        to: u64::arbitrary(g) % max_processes,
+                    },
+                    num if num <= 2 => TestOp::Delete { process, position },
+                    _ => TestOp::Insert {
+                        value: Value::from(format!("{}", u8::arbitrary(g))),
+                        process,
+                        position,
                     },
                 }
-                .unwrap()
             }
-            TestOp::Delete { process, position } => {
-                let list = lists.get_mut(process as usize).unwrap();
-                let index = match position {
-                    Position::Head => 0,
-                    Position::Tail => list.size().max(1) - 1,
-                    Position::InBetween(val) => val % list.size().max(1),
-                };
-                list.delete(index).ok();
-            }
-            TestOp::Merge { from, to } => {
-                let (from, to) = (from as usize, to as usize);
-                let diff = {
-                    let list_from = lists.get(from).unwrap();
-                    let list_to = lists.get(to).unwrap();
-                    list_from.diff(list_to.vclock())
-                };
-                match lists.get_mut(to).unwrap().apply(&diff) {
-                    Ok(_) => (),
-                    Err(e) => {
-                        return TestResult::error(format!(
-                            "failed to apply diff between {} and {}: {:?}",
-                            from, to, e
-                        ))
+        }
+
+        fn check(ops: Vec<TestOp>) -> TestResult {
+            // allocate lists
+            let max = (&ops).iter().map(|op| op.process()).max();
+            let lists = &mut match max {
+                Some(max) => (0..=max)
+                    .map(|pos| <$list_type>::new(pos))
+                    .collect::<Vec<_>>(),
+                None => return TestResult::discard(),
+            };
+
+            for op in ops {
+                match op {
+                    TestOp::Insert {
+                        process,
+                        value,
+                        position,
+                    } => {
+                        let list = lists.get_mut(process as usize).unwrap();
+                        let index = match position {
+                            Position::Head => 0,
+                            Position::Tail => list.size(),
+                            Position::InBetween(val) => {
+                                let size = list.size();
+                                if size == 0 {
+                                    0
+                                } else {
+                                    val % size
+                                }
+                            }
+                        };
+                        gen_qcheck!($($setup)*, list, index, value)
+                        .unwrap()
+                    }
+                    TestOp::Delete { process, position } => {
+                        let list = lists.get_mut(process as usize).unwrap();
+                        let index = match position {
+                            Position::Head => 0,
+                            Position::Tail => list.size().max(1) - 1,
+                            Position::InBetween(val) => val % list.size().max(1),
+                        };
+                        list.delete(index).ok();
+                    }
+                    TestOp::Merge { from, to } => {
+                        let (from, to) = (from as usize, to as usize);
+                        let diff = {
+                            let list_from = lists.get(from).unwrap();
+                            let list_to = lists.get(to).unwrap();
+                            list_from.diff(list_to.vclock())
+                        };
+                        match lists.get_mut(to).unwrap().apply(&diff) {
+                            Ok(_) => (),
+                            Err(e) => {
+                                return TestResult::error(format!(
+                                    "failed to apply diff between {} and {}: {:?}",
+                                    from, to, e
+                                ))
+                            }
+                        }
                     }
                 }
             }
-        }
-    }
 
-    // merge all lists
-    let len = lists.len();
-    for from in 0..len {
-        for to in 0..len {
-            let diff = {
-                let list_from = lists.get(from).unwrap();
-                let list_to = lists.get(to).unwrap();
-                list_from.diff(list_to.vclock())
-            };
-            match lists.get_mut(to).unwrap().apply(&diff) {
-                Ok(_) => (),
-                Err(e) => {
-                    return TestResult::error(format!(
-                        "failed to apply diff between {} and {}: {:?}",
-                        from, to, e
-                    ))
+            // merge all lists
+            let len = lists.len();
+            for from in 0..len {
+                for to in 0..len {
+                    let diff = {
+                        let list_from = lists.get(from).unwrap();
+                        let list_to = lists.get(to).unwrap();
+                        list_from.diff(list_to.vclock())
+                    };
+                    match lists.get_mut(to).unwrap().apply(&diff) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            return TestResult::error(format!(
+                                "failed to apply diff between {} and {}: {:?}",
+                                from, to, e
+                            ))
+                        }
+                    }
                 }
             }
+
+            // compare list with each other
+            let eq = lists
+                .windows(2)
+                .map(|slice| slice.get(0).unwrap().to_vec() == slice.get(1).unwrap().to_vec())
+                .all(|x| x == true);
+            if !eq {
+                return TestResult::error("lists do not converge after merging");
+            }
+
+            // check that total diff restores list
+            let eq = lists
+                .iter()
+                .map(|list| {
+                    let mut empty = <$list_type>::new(100500);
+                    let diff = list.diff(empty.vclock());
+                    empty.apply(&diff).is_ok() && empty.to_vec() == list.to_vec()
+                })
+                .all(|x| x == true);
+            if !eq {
+                return TestResult::error("could not rebuild list from total diff");
+            }
+            TestResult::from_bool(true)
         }
+        quickcheck(check as fn(Vec<TestOp>) -> TestResult);
     }
-
-    // compare list with each other
-    let eq = lists
-        .windows(2)
-        .map(|slice| slice.get(0).unwrap().to_vec() == slice.get(1).unwrap().to_vec())
-        .all(|x| x == true);
-    if !eq {
-        return TestResult::error("lists do not converge after merging");
-    }
-
-    // check that total diff restores list
-    let eq = lists
-        .iter()
-        .map(|list| {
-            let mut empty = GenericList::<Key<T>>::new(100500);
-            let diff = list.diff(empty.vclock());
-            empty.apply(&diff).is_ok() && empty.to_vec() == list.to_vec()
-        })
-        .all(|x| x == true);
-    if !eq {
-        return TestResult::error("could not rebuild list from total diff");
-    }
-    TestResult::from_bool(true)
 }
 
 #[test]
 fn test_list_convergence() {
-    quickcheck(check as fn(Vec<TestOp<Ratio<BigInt>>>) -> TestResult);
+    gen_qcheck!(List, Key<Ratio<BigInt>>, @insert_allowed);
 }
 
 #[test]
 fn test_append_only_list_convergence() {
-    quickcheck(check as fn(Vec<TestOp<i64>>) -> TestResult);
+    gen_qcheck!(AppendOnlyList, Key<i64>, @insert_not_allowed);
 }

@@ -56,13 +56,12 @@ pub trait ListKey: Sized + Ord + Eq + Clone {
         left: Option<&Self>,
         right: Option<&Self>,
     ) -> Result<Self, ListError>;
-
-    /// Check if key supports  arbitrary precision arithmetic
-    ///
-    /// If it does - insert at any position is allowed
-    /// Otherwise - it's a key for append-only list
-    fn is_arbitraty_precision() -> bool;
 }
+
+/// Marker trait
+///
+/// Indicates that key supports insert at any position
+pub trait InsertableKey: ListKey {}
 
 impl ListKey for Key<Ratio<BigInt>> {
     /// Create new key between left and right keys
@@ -82,9 +81,6 @@ impl ListKey for Key<Ratio<BigInt>> {
         };
         Ok(Key { id, process, op })
     }
-    fn is_arbitraty_precision() -> bool {
-        true
-    }
 }
 
 impl ListKey for Key<i64> {
@@ -102,11 +98,9 @@ impl ListKey for Key<i64> {
         };
         Ok(Key { id, process, op })
     }
-
-    fn is_arbitraty_precision() -> bool {
-        false
-    }
 }
+
+impl InsertableKey for Key<Ratio<BigInt>> {}
 
 /// Value represents data types, which list can currently store
 ///
@@ -258,7 +252,7 @@ impl std::fmt::Display for ListError {
 
 impl std::error::Error for ListError {}
 
-/// List
+/// GenericList
 #[derive(Debug)]
 pub struct GenericList<Key> {
     /// process id
@@ -316,28 +310,19 @@ where
     /// Insert value at index
     pub fn insert(&mut self, index: usize, value: Value<Key<T>>) -> Result<(), ListError>
     where
-        Key<T>: ListKey,
+        Key<T>: InsertableKey,
     {
-        let mut keys = self.data.keys();
-        let (left, right) = match index {
-            index if index > self.data.len() => return Err(ListError::OutOfBounds),
-            index if index == 0 => (None, keys.next()),
-            index if index == self.data.len() => (keys.nth(self.data.len() - 1), None),
-            index => {
-                let left = (&mut keys).nth(index - 1);
-                let right = keys.next();
-                (left, right)
-            }
-        };
-        let key = Key::between(
-            self.process,
-            self.vclock.next_value(self.process),
-            left,
-            right,
-        )?;
-        self.on_update(&key, &value);
-        self.insert_key(key, value);
-        Ok(())
+        self.insert_at(index, value)
+    }
+
+    /// Append value at the end
+    pub fn append(&mut self, value: Value<Key<T>>) -> Result<(), ListError> {
+        self.insert_at(self.data.len(), value)
+    }
+
+    /// Insert value at the start
+    pub fn prepend(&mut self, value: Value<Key<T>>) -> Result<(), ListError> {
+        self.insert_at(0, value)
     }
 
     /// Delete value at index
@@ -401,16 +386,6 @@ where
         Ok(())
     }
 
-    /// Append value at the end
-    pub fn append(&mut self, value: Value<Key<T>>) -> Result<(), ListError> {
-        self.insert(self.data.len(), value)
-    }
-
-    /// Insert value at the start
-    pub fn prepend(&mut self, value: Value<Key<T>>) -> Result<(), ListError> {
-        self.insert(0, value)
-    }
-
     /// Build vector of values
     pub fn to_vec(&self) -> Vec<&Value<Key<T>>> {
         self.iter().collect()
@@ -464,6 +439,32 @@ where
     pub fn size(&self) -> usize {
         // FIXME: add list metrics to avoid scan
         self.data.values().filter(|x| x.visible()).count()
+    }
+
+    fn insert_at(&mut self, index: usize, value: Value<Key<T>>) -> Result<(), ListError>
+    where
+        Key<T>: ListKey,
+    {
+        let mut keys = self.data.keys();
+        let (left, right) = match index {
+            index if index > self.data.len() => return Err(ListError::OutOfBounds),
+            index if index == 0 => (None, keys.next()),
+            index if index == self.data.len() => (keys.nth(self.data.len() - 1), None),
+            index => {
+                let left = (&mut keys).nth(index - 1);
+                let right = keys.next();
+                (left, right)
+            }
+        };
+        let key = Key::between(
+            self.process,
+            self.vclock.next_value(self.process),
+            left,
+            right,
+        )?;
+        self.on_update(&key, &value);
+        self.insert_key(key, value);
+        Ok(())
     }
 
     fn insert_key(&mut self, key: Key<T>, value: Value<Key<T>>) {
