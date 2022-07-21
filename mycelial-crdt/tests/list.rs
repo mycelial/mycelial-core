@@ -1,4 +1,4 @@
-use mycelial_crdt::list::{Key, ListKey, List, AppendOnlyList, ListError, Op, Value};
+use mycelial_crdt::list::{AppendOnlyList, Key, List, ListError, ListKey, Op, Value};
 use num::rational::Ratio;
 use num::BigInt;
 use quickcheck::{quickcheck, Arbitrary, Gen, TestResult};
@@ -216,8 +216,6 @@ fn test_on_apply_hook() {
     list_1.unset_on_apply();
     assert!(matches!(rx.recv(), Err(_)))
 }
-
-
 
 #[derive(Debug, Clone)]
 enum Position {
