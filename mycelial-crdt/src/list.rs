@@ -155,6 +155,12 @@ impl<Key> From<bool> for Value<Key> {
     }
 }
 
+impl<Key> From<Vec<Value<Key>>> for Value<Key> {
+    fn from(value: Vec<Value<Key>>) -> Value<Key> {
+        Value::Vec(value)
+    }
+}
+
 impl<Key> PartialEq<str> for Value<Key> {
     fn eq(&self, other: &str) -> bool {
         match self {
