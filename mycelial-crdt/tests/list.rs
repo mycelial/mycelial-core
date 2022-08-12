@@ -1,4 +1,4 @@
-use mycelial_crdt::list::{AppendOnlyList, Key, List, ListError, ListKey, Op, Value};
+use mycelial_crdt::list::{AppendOnlyList, Key, List, ListKey, Op, Value};
 use num::rational::Ratio;
 use num::BigInt;
 use quickcheck::{quickcheck, Arbitrary, Gen, TestResult};
@@ -414,4 +414,175 @@ fn test_list_convergence() {
 #[test]
 fn test_append_only_list_convergence() {
     gen_qcheck!(AppendOnlyList, Key<i64>, @insert_not_allowed);
+}
+
+// Check if append function always appends at the end of the list:
+// Input is a sorted list of elements with mixed operations of deletion at random index
+// (tombstones are no visible as a data, but they do occupy index space in the tree)
+// If append, for some reason, inserts not at the end - order of values will no longer be sorted
+// in call to `to_vec` or `iter`
+#[test]
+fn test_append() {
+    #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+    enum TestOp {
+        Append(String),
+        Delete(usize),
+    }
+
+    #[derive(Debug, Clone)]
+    struct SortedVec(Vec<TestOp>);
+
+    impl Arbitrary for SortedVec {
+        fn arbitrary(g: &mut Gen) -> Self {
+            let size = usize::arbitrary(g) % 100;
+            Self({
+                let mut v = (0..size)
+                    .map(|_| {
+                        let s = format!("{}", i64::arbitrary(g) % 1000);
+                        TestOp::Append(s)
+                    })
+                    .collect::<Vec<_>>();
+                v.sort();
+                v.into_iter()
+                    .flat_map(|op| match u8::arbitrary(g) % 3 == 0 {
+                        true => vec![op, TestOp::Delete(usize::arbitrary(g))],
+                        false => vec![op],
+                    })
+                    .collect()
+            })
+        }
+
+        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+            #[derive(Debug)]
+            struct SortedVecShrinker(Vec<TestOp>);
+            impl Iterator for SortedVecShrinker {
+                type Item = SortedVec;
+                fn next(&mut self) -> Option<Self::Item> {
+                    if self.0.len() == 0 {
+                        return None;
+                    };
+                    self.0 = self.0[..self.0.len() - 1].to_vec();
+                    Some(SortedVec(self.0.clone()))
+                }
+            }
+            Box::new(SortedVecShrinker(self.0.clone()))
+        }
+    }
+
+    macro_rules! check {
+        ($list: ident) => {
+            let check = |input: SortedVec| -> TestResult {
+                let mut l = $list::new(0);
+                for op in input.0 {
+                    match op {
+                        TestOp::Append(v) => l.append(v.into()).expect("failed to append"),
+                        TestOp::Delete(pos) => l.delete(pos % l.size()).expect("failed to delete"),
+                    }
+                }
+                let str_vec = l
+                    .iter()
+                    .map(|v| {
+                        if let Value::Str(s) = v {
+                            return s.clone();
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let is_sorted = str_vec
+                    .as_slice()
+                    .windows(2)
+                    .all(|slice| slice[0] <= slice[1]);
+                TestResult::from_bool(is_sorted)
+            };
+            quickcheck(check as fn(SortedVec) -> TestResult)
+        };
+    }
+    check!(AppendOnlyList);
+    check!(List);
+}
+
+
+// Check if prepend function always inserts at start
+// Same approach as with append
+#[test]
+fn test_prepend() {
+    #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+    enum TestOp {
+        Prepend(String),
+        Delete(usize),
+    }
+
+    #[derive(Debug, Clone)]
+    struct SortedVec(Vec<TestOp>);
+
+    impl Arbitrary for SortedVec {
+        fn arbitrary(g: &mut Gen) -> Self {
+            let size = usize::arbitrary(g) % 100;
+            Self({
+                let mut v = (0..size)
+                    .map(|_| {
+                        let s = format!("{}", i64::arbitrary(g) % 1000);
+                        TestOp::Prepend(s)
+                    })
+                    .collect::<Vec<_>>();
+                v.sort();
+                v.into_iter()
+                    .rev()
+                    .flat_map(|op| match u8::arbitrary(g) % 3 == 0 {
+                        true => vec![op, TestOp::Delete(usize::arbitrary(g))],
+                        false => vec![op],
+                    })
+                    .collect()
+            })
+        }
+
+        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+            #[derive(Debug)]
+            struct SortedVecShrinker(Vec<TestOp>);
+            impl Iterator for SortedVecShrinker {
+                type Item = SortedVec;
+                fn next(&mut self) -> Option<Self::Item> {
+                    if self.0.len() == 0 {
+                        return None;
+                    };
+                    self.0 = self.0[..self.0.len() - 1].to_vec();
+                    Some(SortedVec(self.0.clone()))
+                }
+            }
+            Box::new(SortedVecShrinker(self.0.clone()))
+        }
+    }
+
+    macro_rules! check {
+        ($list: ident) => {
+            let check = |input: SortedVec| -> TestResult {
+                let mut l = $list::new(0);
+                for op in input.0 {
+                    match op {
+                        TestOp::Prepend(v) => l.prepend(v.into()).expect("failed to append"),
+                        TestOp::Delete(pos) => l.delete(pos % l.size()).expect("failed to delete"),
+                    }
+                }
+                let str_vec = l
+                    .iter()
+                    .map(|v| {
+                        if let Value::Str(s) = v {
+                            return s.clone();
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let is_sorted = str_vec
+                    .as_slice()
+                    .windows(2)
+                    .all(|slice| slice[0] <= slice[1]);
+                TestResult::from_bool(is_sorted)
+            };
+            quickcheck(check as fn(SortedVec) -> TestResult)
+        };
+    }
+    check!(AppendOnlyList);
+    check!(List);
 }
