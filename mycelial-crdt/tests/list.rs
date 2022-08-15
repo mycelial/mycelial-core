@@ -418,7 +418,7 @@ fn test_append_only_list_convergence() {
 
 // Check if append function always appends at the end of the list:
 // Input is a sorted list of elements with mixed operations of deletion at random index
-// (tombstones are no visible as a data, but they do occupy index space in the tree)
+// (tombstones are not visible as a data, but they do occupy index space in the tree)
 // If append, for some reason, inserts not at the end - order of values will no longer be sorted
 // in call to `to_vec` or `iter`
 #[test]
