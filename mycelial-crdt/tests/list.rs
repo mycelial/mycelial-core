@@ -560,7 +560,7 @@ fn test_prepend() {
                 let mut l = $list::new(0);
                 for op in input.0 {
                     match op {
-                        TestOp::Prepend(v) => l.prepend(v.into()).expect("failed to append"),
+                        TestOp::Prepend(v) => l.prepend(v.into()).expect("failed to prepend"),
                         TestOp::Delete(pos) => l.delete(pos % l.size()).expect("failed to delete"),
                     }
                 }
