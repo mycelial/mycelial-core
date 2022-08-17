@@ -455,7 +455,7 @@ where
         let (left, right) = match index {
             index if index > self.data.len() => return Err(ListError::OutOfBounds),
             index if index == 0 => (None, keys.next()),
-            index if index == self.data.len() => (keys.nth(self.data.len() - 1), None),
+            index if index == self.data.len() => (keys.next_back(), None),
             index => {
                 let left = (&mut keys).nth(index - 1);
                 let right = keys.next();
